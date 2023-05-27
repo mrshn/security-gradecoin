@@ -1,29 +1,54 @@
-import threading
+import concurrent.futures
+import queue
 import base64
-# import requests
+import requests
 import hashlib
 import jwt
 import time
+import random
+import json
+
+from json import JSONEncoder
 
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad
 from Crypto.Hash import SHA256
 from datetime import datetime
-import json
 
 
 from transaction import Transaction
 from rsa_key_util import RsaUtil
-
+from slaviu import Slaviu
 
 transaction_url = "https://gradecoin.xyz/transaction"
+block_url = "https://gradecoin.xyz/block"
 register_url = "https://gradecoin.xyz/register" 
 
 
+class TransactionEncoder(JSONEncoder):
+    def default(self, t):
+        if isinstance(t, Transaction):
+            return t.to_dict()
+        return super().default(t)
+
+def mine_block(starting_string, left,right):
+    nonce = random.randint(0, 2**32 - 1)
+    gfg = hashlib.blake2s()
+    
+    while True:
+            # temp_block_data_json = left+str(nonce)+right
+            # gfg.update(temp_block_data_json.encode())
+            gfg.update(f'{left}{nonce}{right}'.encode())
+            if(gfg.hexdigest().startswith(starting_string)):
+                print("IIIIII amm finished")
+                return (gfg.hexdigest() , nonce)
+            nonce += 1
+        
+
 class SatoshiNakamoto:
     def __init__(self):
-        self.my_source_address = "57330b4ffe02348404ee878be5938d4558fb7883ced4d9186b6fba11693c137d"
+        self.my_source_address = "dc6476290c9f42efe6b5bebead16cf067ca18b5b593d12e01bff656fa173eecc"
         self.my_rsa_util = RsaUtil()
         self.gradecoin_public_key = self.my_rsa_util.read_gradecoin_public_key()
         
@@ -32,48 +57,47 @@ class SatoshiNakamoto:
 
         # Extracting the public key in PEM format
         self.my_RSA_Pem_Private_key = self.my_rsa_util.get_my_RSA_Pem_Private_key()
-        print(self.my_RSA_Pem_Public_key)
-        print("anan")
-        print(self.my_RSA_Pem_Private_key)
 
+        # print(self.my_RSA_Pem_Public_key)
+        # print(self.my_RSA_Pem_Private_key)
+
+        self.jwt_token = None
+        self.transactions = {}
         self._generate_jwt_token()
-        self.transaction_dicts = {}
+        self.threads = []
 
 
     def start(self):
         print("Satoshi Nakamoto is alive...")
-        self.register()
+        # self.register()
 
-        # while True:
+        # self.get_transaction()
+        # self.get_block()
+        # self.create_transaction()
+        while True:
+            self.create_block()
 
             # agent = Slaviu(client_socket)
             # agent.start()
 
     def _post_call(self,url,json,headers):
-        # TODO: check if the field is json or data
-        response = requests.post(url, json=json, headers=headers)
-        print(response)
-        response_data = response.json()
-        print(response_data)
-        if response.status_code == 200:
-            print("Registration successful!")
-            print("Response:", response.text)
-        else:
-            print("Registration failed. Status code:", response.status_code)
-            print("Response:", response.text)
+        response = requests.post(url, data=json, headers=headers)
+        print("\nResponse\n", response, "\n")
+        # response_data = response.json()
+        # print("\nResponse Data\n", response_data, "\n" )
+        print("\nResponse Text\n", response.text, "\n" )
+        print("\nResponse Status Code\n", response.status_code, "\n" )
+
         return response
 
     def _get_call(self,url,headers):
         response = requests.get(url, headers=headers)
-        print(response)
+        # print("\nResponse\n", response, "\n")
         response_data = response.json()
-        print(response_data)
-        if response.status_code == 200:
-            print("Registration successful!")
-            print("Response:", response.text)
-        else:
-            print("Registration failed. Status code:", response.status_code)
-            print("Response:", response.text)
+        # print("\nResponse Data\n", response_data, "\n" )
+        # print("\nResponse Text\n", response.text, "\n" )
+        # print("\nResponse Status Code\n", response.status_code, "\n" )
+
         return response
 
 
@@ -107,117 +131,177 @@ class SatoshiNakamoto:
             "iv": iv_base64,
             "key": key_ciphertext_base64
         }
-         
+        auth_data = json.dumps(auth_request)
         headers = {}
+        response = self._post_call(register_url,auth_data,headers)
+        return response
 
-        self._post_call(register_url,auth_request,headers)
-        
 
 
     def _generate_jwt_token(self, tha="hash_of_payload" ):
-
-        if(self.jwt_token != None):
-            decoded_token = jwt.decode(self.jwt_token, self.my_RSA_Pem_Public_key, algorithms=["RS256"])
-            issued_at = decoded_token.get('iat')  
-            expiration_time = decoded_token.get('exp')  
-
         payload = {
             "tha": tha,
             "iat": int(time.time()),  
             "exp": int(time.time()) + 3600  # Expiration Time (1 hour from now)
         }
-
         private_key_pem = self.my_rsa_util.get_my_RSA_Pem_Private_key()
         self.jwt_token = jwt.encode(payload, private_key_pem, algorithm='RS256')
 
 
     def get_transaction(self):
-
-        headers = {
-            "Authorization": f"Bearer {self.jwt_token}"
-        }
-
-
-        response = self._get_call(transaction_url, headers=headers)
+        response = self._get_call( transaction_url, headers={} )
         response_data = response.json()
-
-        # Convert the response data to Python objects
-        source =""
-        transactions = {}
+        self.transactions = {}
         for transaction_id, transaction_data in response_data.items():
             transaction = Transaction.from_dict(transaction_data)
-            source = transaction.source
-            transactions[transaction_id] = transaction
+            self.transactions[transaction_id] = transaction
 
-        # Access the transactions by their IDs
-        for transaction_id, transaction in transactions.items():
-            print(f"Transaction ID: {transaction_id}")
-            print(f"Source: {transaction.source}")
-            print(f"Target: {transaction.target}")
-            print(f"Amount: {transaction.amount}")
-            print(f"Timestamp: {transaction.timestamp}")
-            print()
+    def is_transaction_sent(self, target_source):
+        for _ , transaction in self.transactions.items():
+            if(self.my_source_address == transaction.source and target_source == transaction.target):
+                return True
+        return False 
 
-        # Convert the Transaction objects to dictionaries using the ID as a key
-        self.transaction_dicts = {}
-        
-        for transaction_id, transaction in transactions.items():
-            self.transaction_dicts[transaction_id] = transaction.to_dict()
-
-
-    def get_transaction_source(self):
-        if list(self.transaction_dicts.keys()).__len__ > 0:
-            return list(self.transaction_dicts.keys())[0]
+    def get_first_transaction_source(self):
+        self.get_transaction()
+        for _ , transaction in self.transactions.items():
+            if(self.my_source_address != transaction.source and not self.is_transaction_sent(transaction.source)):
+                return transaction.source
+            if(self.my_source_address != transaction.target and not self.is_transaction_sent(transaction.target)):
+                return transaction.target
         return None    
 
     def create_transaction(self):
-
-        source = self.get_transaction_source()
+        source = self.get_first_transaction_source()
         if source is None:
             return None
-        
-        transaction_data = {
+        transaction_json = {
             'source': self.my_source_address,
             'target': source,
             'amount': 1,
             'timestamp': datetime.now().isoformat()
         }
 
-        transaction_data_json = json.dumps(transaction_data)
-        transaction_data_json = transaction_data_json.replace(" ", "")
-        # transaction_data_json = """{"source":"57330b4ffe02348404ee878be5938d4558fb7883ced4d9186b6fba11693c137d","target":"9bd3b2539516692aabd605ee7ee77737b28e232d5d919325c0a60f05026fc96c","amount":1,"timestamp":"2023-05-25T22:56:41.238319860"}"""
-        anan = transaction_data_json.encode()
-        print(anan)
-        print("allah")
-        md5_hash = hashlib.md5(transaction_data_json.encode()).hexdigest()
-        print(md5_hash)
-        # md5_hash = "846cad0cabc83556b1649d1fa92e958c"
-        print(md5_hash)
+        transaction_data = json.dumps(transaction_json)
+        transaction_data = transaction_data.replace(" ", "")
+        md5_hash = hashlib.md5(transaction_data.encode()).hexdigest()
       
         self._generate_jwt_token(tha=md5_hash)
+        headers = {
+            "Authorization": f"Bearer {self.jwt_token}"
+        }
+        response = self._post_call(transaction_url, transaction_data, headers)
+        return response
 
+
+    def get_block(self):
+        headers = {
+            "Authorization": f"Bearer {self.jwt_token}"
+        }
+        response = self._get_call(block_url, headers=headers)
+        return response
+
+    def form_transaction_list(self):
+        self.get_transaction()
+        cur_transactions = list(self.transactions.values())
+        if cur_transactions.__len__() > 5:
+            if(cur_transactions[0].source != self.my_source_address):
+                for i in range( len(cur_transactions) ):
+                    if(self.my_source_address == cur_transactions[i].source):
+                        my_transaction = cur_transactions[i]
+                        del cur_transactions[i]
+                        cur_transactions.insert(0, my_transaction)
+                        return cur_transactions[:6]
+                self.create_transaction()
+                return self.form_transaction_list()
+            else:
+                return cur_transactions[:6]
+        else:
+            self.create_transaction()
+            return self.form_transaction_list()
+
+    def start_mining(self, starting_string, left, right):
+
+        result_queue = queue.Queue()
+        
+        for _ in range(8):
+            nonce = random.randint(0, 2**32 - 1)
+            miner = Slaviu(starting_string, left,nonce, right,result_queue)
+            self.threads.append(miner)
+            miner.start()
+
+        result = result_queue.get()  
+        return result
+
+        
+
+    def find_blake_hash(self,formed_transaction_list, timestamp):
+
+        nonce = random.randint(0, 2**32 - 1)
+        blake_hash_value : None
+        starting_string = "000000"
+
+        temp_block_data = {
+                "transaction_list": formed_transaction_list,
+                "nonce": nonce,
+                "timestamp": timestamp
+            }
+        
+        temp_block_data_json = json.dumps(temp_block_data,cls=TransactionEncoder)
+        temp_block_data_json = temp_block_data_json.replace(" ", "")
+        
+        the_nonce_str = '"nonce":'
+        i = temp_block_data_json.find(the_nonce_str)
+        left = temp_block_data_json[:i] + the_nonce_str
+        right = temp_block_data_json[i:]
+        i2 = right.find(",")
+        right = right[i2:]
+
+        return self.start_mining(starting_string, left, right)
+    
+        # while True:
+            
+        #     temp_block_data_json = left+str(nonce)+right
+        #     blake_hash_value = hashlib.blake2s(temp_block_data_json.encode()).hexdigest()
+        #     if(blake_hash_value.startswith(starting_string)):
+        #         break
+        #     nonce += 1
+        
+        # return (blake_hash_value , nonce)
+
+    def get_tr_id_list(self,formed_transaction_list):
+        tr_id_list = []
+        for tr in formed_transaction_list:
+            for tr_id, tr2 in self.transactions.items():
+                if(tr2.source == tr.source and tr2.target == tr.target):
+                    tr_id_list += [tr_id]
+                    break
+        return tr_id_list
+    
+    def create_block(self):
+        time_stamp = datetime.now().isoformat()
+        formed_transaction_list = self.form_transaction_list()
+        tr_id_list = self.get_tr_id_list(formed_transaction_list)
+        (blake_hash_value , nonce) = self.find_blake_hash(tr_id_list,time_stamp)
+       
+        block_json = {
+            "transaction_list": tr_id_list,
+            "nonce": nonce,
+            "timestamp": time_stamp,
+            "hash": blake_hash_value
+        }
+
+        block_data = json.dumps(block_json,cls=TransactionEncoder)
+        block_data = block_data.replace(" ", "")
+      
+        self._generate_jwt_token(tha=blake_hash_value)
         headers = {
             "Authorization": f"Bearer {self.jwt_token}"
         }
 
-        response = self._post_call(transaction_url, transaction_data_json, headers)
-        # response = requests.post(url, data=transaction_data_json, auth=BearerAuth(jwt_token))
+        response = self._post_call(block_url, block_data, headers)
 
+        for thread in self.threads:
+            thread.join()
 
-
-
-
-
-
-
-
-# Response: {"res":"Success","message":"You have authenticated to use Gradecoin with identifier 57330b4ffe02348404ee878be5938d4558fb7883ced4d9186b6fba11693c137d"}
-
-
-
-# class BearerAuth(requests.auth.AuthBase):
-#     def __init__(self, token):
-#         self.token = token
-#     def __call__(self, r):
-#         r.headers["authorization"] = "Bearer " + self.token
-#         return r
+        return response

@@ -13,21 +13,21 @@ class RsaUtil:
         if os.path.exists(my_private_key_file) and os.path.exists(my_public_key_file):
             self.read_RSA_from_file()
         else:
-            self.generate_my_RSA()
+            # self.generate_my_RSA()
             self.read_RSA_from_file()
 
     def read_gradecoin_public_key(self,):
         return self.gradecoin_public_key
 
-    def generate_my_RSA(self,):
-        # Generating RSA key pair
-        generated_rsa_key = RSA.generate(2048)
+    # def generate_my_RSA(self,):
+    #     # Generating RSA key pair
+    #     generated_rsa_key = RSA.generate(2048)
 
-        with open(my_private_key_file, 'wb') as f:
-            f.write(generated_rsa_key.export_key(pkcs=8))
+    #     with open(my_private_key_file, 'wb') as f:
+    #         f.write(generated_rsa_key.export_key(pkcs=8))
 
-        with open(my_public_key_file, 'wb') as f:
-            f.write(generated_rsa_key.publickey().export_key(pkcs=8))
+    #     with open(my_public_key_file, 'wb') as f:
+    #         f.write(generated_rsa_key.publickey().export_key(pkcs=8))
 
 
     def read_RSA_from_file(self,):
@@ -43,10 +43,10 @@ class RsaUtil:
             self.public_key = RSA.import_key(public_key_pem)
 
         # Print the keys (for demonstration purposes)
-        print("Private Key:")
-        print(self.private_key.export_key(pkcs=8).decode("utf-8"))
-        print("\nPublic Key:")
-        print(self.public_key.export_key(pkcs=8).decode("utf-8"))
+        # print("Private Key:")
+        # print(self.private_key.export_key(pkcs=8).decode("utf-8"))
+        # print("\nPublic Key:")
+        # print(self.public_key.export_key(pkcs=8).decode("utf-8"))
 
     def get_my_RSA_Pem_Public_key(self,):
         return self.public_key.export_key(pkcs=8).decode("utf-8")
