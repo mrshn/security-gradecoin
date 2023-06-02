@@ -7,6 +7,9 @@ import jwt
 import time
 import random
 import json
+import threading
+import os
+import sys 
 
 from json import JSONEncoder
 
@@ -20,6 +23,8 @@ from datetime import datetime
 from transaction import Transaction
 from rsa_key_util import RsaUtil
 from slaviu import Slaviu
+from watcher import Watcher
+
 
 transaction_url = "https://gradecoin.xyz/transaction"
 block_url = "https://gradecoin.xyz/block"
@@ -32,23 +37,12 @@ class TransactionEncoder(JSONEncoder):
             return t.to_dict()
         return super().default(t)
 
-def mine_block(starting_string, left,right):
-    nonce = random.randint(0, 2**32 - 1)
-    gfg = hashlib.blake2s()
-    
-    while True:
-            # temp_block_data_json = left+str(nonce)+right
-            # gfg.update(temp_block_data_json.encode())
-            gfg.update(f'{left}{nonce}{right}'.encode())
-            if(gfg.hexdigest().startswith(starting_string)):
-                print("IIIIII amm finished")
-                return (gfg.hexdigest() , nonce)
-            nonce += 1
-        
+
 
 class SatoshiNakamoto:
     def __init__(self):
         self.my_source_address = "dc6476290c9f42efe6b5bebead16cf067ca18b5b593d12e01bff656fa173eecc"
+        # self.my_source_address = "dc6476290c9f42efe6b5bebead16cf067ca18b5b593d12e01bff656fa173eecc"
         self.my_rsa_util = RsaUtil()
         self.gradecoin_public_key = self.my_rsa_util.read_gradecoin_public_key()
         
@@ -155,6 +149,7 @@ class SatoshiNakamoto:
         for transaction_id, transaction_data in response_data.items():
             transaction = Transaction.from_dict(transaction_data)
             self.transactions[transaction_id] = transaction
+        print("Transaction Count: {}".format(len(self.transactions)))
 
     def is_transaction_sent(self, target_source):
         for _ , transaction in self.transactions.items():
@@ -204,33 +199,42 @@ class SatoshiNakamoto:
     def form_transaction_list(self):
         self.get_transaction()
         cur_transactions = list(self.transactions.values())
-        if cur_transactions.__len__() > 5:
+        if cur_transactions.__len__() > 9:
             if(cur_transactions[0].source != self.my_source_address):
                 for i in range( len(cur_transactions) ):
                     if(self.my_source_address == cur_transactions[i].source):
                         my_transaction = cur_transactions[i]
                         del cur_transactions[i]
                         cur_transactions.insert(0, my_transaction)
-                        return cur_transactions[:6]
+                        return cur_transactions[:10]
                 self.create_transaction()
                 return self.form_transaction_list()
             else:
-                return cur_transactions[:6]
+                return cur_transactions[:10]
         else:
-            self.create_transaction()
-            return self.form_transaction_list()
+            if cur_transactions.__len__() == 9:
+                self.create_transaction()
+                return self.form_transaction_list()
+            return None
 
     def start_mining(self, starting_string, left, right):
 
         result_queue = queue.Queue()
-        
-        for _ in range(8):
+        stop_event = threading.Event()
+
+        for _ in range(12):
             nonce = random.randint(0, 2**32 - 1)
-            miner = Slaviu(starting_string, left,nonce, right,result_queue)
+            miner = Slaviu(starting_string, left,nonce, right,result_queue,stop_event)
             self.threads.append(miner)
             miner.start()
+        
+        watcher = Watcher(result_queue,stop_event)
+        self.threads.append(watcher)
+        watcher.start()
 
-        result = result_queue.get()  
+        result = result_queue.get() 
+        if not stop_event.is_set():
+            stop_event.set()
         return result
 
         
@@ -281,6 +285,8 @@ class SatoshiNakamoto:
     def create_block(self):
         time_stamp = datetime.now().isoformat()
         formed_transaction_list = self.form_transaction_list()
+        if formed_transaction_list is None:
+            return
         tr_id_list = self.get_tr_id_list(formed_transaction_list)
         (blake_hash_value , nonce) = self.find_blake_hash(tr_id_list,time_stamp)
        
@@ -301,7 +307,6 @@ class SatoshiNakamoto:
 
         response = self._post_call(block_url, block_data, headers)
 
-        for thread in self.threads:
-            thread.join()
-
+        # sys.exit(0)
+        # os.system('main.py')
         return response
