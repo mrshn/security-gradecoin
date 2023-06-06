@@ -63,16 +63,16 @@ class SatoshiNakamoto:
 
     def start(self):
         print("Satoshi Nakamoto is alive...")
+        
+        # Register if you haven't already
         # self.register()
 
-        # self.get_transaction()
-        # self.get_block()
+        # call register if needed
+        # this method will be fetching the existing transactions and finding a apropriate target id to send the transaction itself
         # self.create_transaction()
         while True:
             self.create_block()
 
-            # agent = Slaviu(client_socket)
-            # agent.start()
 
     def _post_call(self,url,json,headers):
         response = requests.post(url, data=json, headers=headers)
@@ -87,7 +87,7 @@ class SatoshiNakamoto:
     def _get_call(self,url,headers):
         response = requests.get(url, headers=headers)
         # print("\nResponse\n", response, "\n")
-        response_data = response.json()
+        # response_data = response.json()
         # print("\nResponse Data\n", response_data, "\n" )
         # print("\nResponse Text\n", response.text, "\n" )
         # print("\nResponse Status Code\n", response.status_code, "\n" )
@@ -129,8 +129,6 @@ class SatoshiNakamoto:
         headers = {}
         response = self._post_call(register_url,auth_data,headers)
         return response
-
-
 
     def _generate_jwt_token(self, tha="hash_of_payload" ):
         payload = {
@@ -196,6 +194,7 @@ class SatoshiNakamoto:
         response = self._get_call(block_url, headers=headers)
         return response
 
+    # This function returs a block if it can otherwise returns None
     def form_transaction_list(self):
         self.get_transaction()
         cur_transactions = list(self.transactions.values())
@@ -207,11 +206,13 @@ class SatoshiNakamoto:
                         del cur_transactions[i]
                         cur_transactions.insert(0, my_transaction)
                         return cur_transactions[:10]
+                # If none of the transactions are send by me I send 1, since that is the rule for a block
                 self.create_transaction()
                 return self.form_transaction_list()
             else:
                 return cur_transactions[:10]
         else:
+            # If len is 9 do not wait for 10 just send one and start mining next process
             if cur_transactions.__len__() == 9:
                 self.create_transaction()
                 return self.form_transaction_list()
@@ -222,18 +223,26 @@ class SatoshiNakamoto:
         result_queue = queue.Queue()
         stop_event = threading.Event()
 
+        # Create threads for mining the hash val
         for _ in range(12):
             nonce = random.randint(0, 2**32 - 1)
             miner = Slaviu(starting_string, left,nonce, right,result_queue,stop_event)
             self.threads.append(miner)
             miner.start()
         
+        # create a listener which stops all other threads
+        #  if some other guy mined the transaction and no chance for me 
+        #  so I am trying to minimize my cpu usage 
         watcher = Watcher(result_queue,stop_event)
         self.threads.append(watcher)
         watcher.start()
 
+        # This ensures when first thread puts the hash value to queue the main thread is processed 
+        #   without waiting on others to finish
         result = result_queue.get() 
         if not stop_event.is_set():
+            # Stop the other threads by setting the common event
+            # so that they won't run for nothing
             stop_event.set()
         return result
 
@@ -263,15 +272,6 @@ class SatoshiNakamoto:
 
         return self.start_mining(starting_string, left, right)
     
-        # while True:
-            
-        #     temp_block_data_json = left+str(nonce)+right
-        #     blake_hash_value = hashlib.blake2s(temp_block_data_json.encode()).hexdigest()
-        #     if(blake_hash_value.startswith(starting_string)):
-        #         break
-        #     nonce += 1
-        
-        # return (blake_hash_value , nonce)
 
     def get_tr_id_list(self,formed_transaction_list):
         tr_id_list = []
@@ -282,6 +282,7 @@ class SatoshiNakamoto:
                     break
         return tr_id_list
     
+    # A smart function which listens for transactions and forms a block when it can 
     def create_block(self):
         time_stamp = datetime.now().isoformat()
         formed_transaction_list = self.form_transaction_list()
@@ -307,6 +308,5 @@ class SatoshiNakamoto:
 
         response = self._post_call(block_url, block_data, headers)
 
-        # sys.exit(0)
-        # os.system('main.py')
+    
         return response
